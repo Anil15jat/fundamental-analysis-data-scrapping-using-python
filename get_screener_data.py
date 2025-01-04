@@ -1,5 +1,4 @@
 from playwright.sync_api import sync_playwright
-import pdb
 import re
 import argparse
 import json
@@ -19,26 +18,30 @@ def get_screener_data():
 
 
     with sync_playwright() as p:
+        # Create a browser object with playwright. headless False creates a user interactable browser window.
         browser = p.chromium.launch(headless=False)
         page = browser.new_page()
         global loginBypass
+        # Skip user login if the username or password or both are missing.
         if len(args.user_name) and len(args.password):
             print("Login into screener account")
             login_to_website(page, args.url, args.user_name, args.password)
             loginBypass = False
-        # in case the company list is not parsed in expected format, fix few of the scenarios before consuming the argument values
+        # In case the company list is not parsed in expected format, fix few of the scenarios before consuming the argument values
         if " " in args.company_list:
             company_list_string = args.company_list.strip().replace(" ",",")
         else:
             company_list_string = args.company_list
         company_list = company_list_string.lstrip('[').rstrip(']').split(',')
+        # Scrap the data for each company code in the list.
         for company_name in company_list:
+            # If company_name field is empty, skip scrapping the data.
             if not len(company_name):
                 continue
             company_data_dict = {}
             print(f"Navigating to company {company_name} page")
             go_to_company_url_screen(page,company_name)
-            # import pdb; pdb.set_trace()
+            # Store the data in a dictionary
             company_data_dict["company_name"] = get_company_name(page)
             company_data_dict["about_company"] = get_about_company(page)
             company_data_dict["ratio"] = get_company_ratios(page)
@@ -50,15 +53,17 @@ def get_screener_data():
             company_data_dict["ratios"] = get_ratios(page)
             company_data_dict["quarterly_shareholding_patterns"] = get_shareholding_patterns(page,pattern_type="quarterly-shp")
             company_data_dict["profilt_loss_ranges_table_content"] = get_profilt_loss_ranges_table_content(page)
-            # import pdb; pdb.set_trace()
             # yearly_shareholding_patterns_dict = get_shareholding_patterns(page,pattern_type="yearly-shp")
             print("######################")
             print(f"company_name : {company_name}")
             print(f"company_data_dict : {company_data_dict}")
             file_name = f'{args.file_directory.rstrip("/")}/{company_name.upper()}.txt'
             file_name_yaml = f'{args.file_directory.rstrip("/")}/{company_name.upper()}.yaml'
+            # Save the dictionary in a .text file
             with open(file_name, "w") as json_file:
                 json_file.write(json.dumps(company_data_dict))
+                json_file.flush()
+            # Save the dictionary in a yaml file. Json conversion is taken care of by the yaml library.
             with open(file_name_yaml, "w") as json_file_yaml:
                 yaml.dump(
                     company_data_dict,
@@ -67,24 +72,34 @@ def get_screener_data():
                     sort_keys=True,
                 )
                 json_file_yaml.flush()
-            # import pdb; pdb.set_trace()
+        # Close the browser window.
         browser.close()
 
+# Method to login into parsed user account
 def login_to_website(page, url, username, password):
+    # Go to the url page.
     page.goto(url)
+    # Find the login button using its xpath and then click it.
     page.locator('//*//a[contains(@class,"button")][contains(@class,"account")][contains(@href,"login")]').click()
+    # Find the username field and enter the username in it.
     page.fill('//*//input[contains(@name,"username")]',username)
+    # Find the password field and enter the password in it.
     page.fill('//*//input[contains(@name,"password")]',password)
+    # Click the submit button.
     page.locator('//*//button[contains(@type,"submit")]').click()
 
+# Method to navigate to specific company page.
 def go_to_company_url_screen(page, company_name):
     try:
+        # Replace company_name_string with the company code to create the URL. 
         company_page_url = 'https://screener.in/company/company_name_string/consolidated'.replace("company_name_string",company_name.upper())
         print(f"Company url : {company_page_url}")
+        # Navigate to the company page.
         page.goto(company_page_url)
     except Exception as err:
         print(f"Exception seen while navigating to company url {company_page_url}; Assertion : {err}")
 
+# Method to scrap company name using xpath.
 def get_company_name(page):
     company_name = None
     try:
@@ -94,17 +109,24 @@ def get_company_name(page):
         print(f"Exception seen while fetching company name; Assertion : {err}")
     return company_name
 
+# Method to scrap company ratios using xpath.
 def get_company_ratios(page):
     ratio_dictionary = {}
     try:
         company_ratio_entry_xpath = '//*//div[contains(@class,"company-ratio")]//ul[contains(@id,"top-ratios")]/li//span[contains(@class,"name")]'
         ratio_name_xpath = company_ratio_entry_xpath + '[normalize-space(text())="ratio_name_string"]'
         ratio_number_xpath = ratio_name_xpath + '/..//span//span[contains(@class,"number")]'
+        # Get all the available ratio objects using xpath.
         ratio_list = page.query_selector_all(company_ratio_entry_xpath)
+        # Collect the data for each ratio one by one.
         for ratio_element in ratio_list:
+            # Get the ratio name from the object.
             ratio_name = ratio_element.inner_text()
+            # Create a key in the dictionary which stores the ratio numbers in a list.
             ratio_name_list = ratio_dictionary.setdefault(ratio_name,[])
+            # Get all the ratio numbers by using custom xpath.
             ratio_number_list = page.query_selector_all(ratio_number_xpath.replace("ratio_name_string",ratio_name))
+            # Append the numbers in the initialized list.
             for ratio_number_element in ratio_number_list:
                 ratio_name_list.append(ratio_number_element.inner_text())
             #ratio_dictionary[ratio_name] = ratio_number
@@ -112,6 +134,7 @@ def get_company_ratios(page):
         print(f"Exception seen while fetching company ratios; Assertion : {err}")
     return ratio_dictionary
 
+# Method to get about company content using xpath.
 def get_about_company(page):
     company_about_content = None
     if loginBypass:
@@ -119,30 +142,40 @@ def get_about_company(page):
     else:
         try:
             company_about_read_more_xpath = '//*//button[contains(normalize-space(text()),"Read More")]'
+            # Find the 'read more' button using xpath and click it.
             page.locator(company_about_read_more_xpath).click()
             company_about_content_xpath = '//*//div[contains(@class,"modal-content")]'
+            # Find about content element and scrap the text.
             company_about_content = page.locator(company_about_content_xpath).inner_text()
             close_company_about_xpath = '//*//div[contains(@class,"modal-header")]//button'
+            # Find close button and click it to close the 'about company' screen.
             page.locator(close_company_about_xpath).click()
         except Exception as err:
             print(f"Exception seen while fetching about company; Assertion : {err}")
     return company_about_content
 
+# Generic method to fetch table data based on the parsed table-id.
 def get_table_content(page,id):
     result_dict = {}
     try:
+        # create the xpath for the custom table using its id
         table_xpath = '//*//section[contains(@id,"id_string")]'.replace("id_string",id)
         header_xpath = table_xpath + '//*//table//thead//tr'
         data_xpath = table_xpath + '//*//table[contains(@class,"data-table")]/tbody/tr'
+        # create a list of the titles of the table in key header in the result_dict
         result_dict["header"] = get_all_elements_text(page,header_xpath)[0].split("\t")
+        # deifine an empty list as value to key 'data'
         result_data_list = result_dict.setdefault("data",[])
+        # fetch the list of all the elements of the respective values from the table
         row_element_list = page.query_selector_all(data_xpath)
+        # store the data in the form of a nested list
         for row in row_element_list:
             result_data_list.append(row.inner_text().split("\t"))
     except Exception as err:
         print(f"Exception seen while fetching table content for table-id {id}; Assertion : {err}")
     return result_dict
 
+# Method to fetch table data for profit loss ranges table.
 def get_profilt_loss_ranges_table_content(page):
     result_dict = {}
     try:
@@ -162,6 +195,7 @@ def get_profilt_loss_ranges_table_content(page):
         print(f"Exception seen while fetching profile loss ranges table content; Assertion : {err}")
     return result_dict
 
+# Method to fetch table data for peer-comparison table.
 def get_peer_comparison(page):
     peer_comparison_dict = {}
     try:
@@ -186,6 +220,7 @@ def get_peer_comparison(page):
         print(f"Exception seen while fetching peer comparison data; Assertion : {err}")
     return peer_comparison_dict
 
+# Method to fetch list of texts of all the elements matching an xpath.
 def get_all_elements_text(driver, elem_xpath, timeout=30000):
     text_list = []
     try:
@@ -197,6 +232,7 @@ def get_all_elements_text(driver, elem_xpath, timeout=30000):
         print(f"Failed to get element text - {e}")
     return text_list
 
+# Method to fetch the ruarterly results table.
 def get_quarterly_results(page):
     quarterly_result_dict = {}
     try:
@@ -213,6 +249,7 @@ def get_quarterly_results(page):
         print(f"Exception seen while fetching quarterly result data; Assertion : {err}")
     return quarterly_result_dict
 
+# Method to fetch the profit-loss table.
 def get_profit_and_loss(page):
     profit_and_loss_dict = {}
     try:
@@ -229,15 +266,19 @@ def get_profit_and_loss(page):
         print(f"Exception seen while fetching profit and loss data; Assertion : {err}")
     return profit_and_loss_dict
 
+# Wrapper method to fetch the balance-sheet table.
 def get_balance_sheet(page):
     return get_table_content(page,"balance-sheet")
 
+# Wrapper method to fetch the cash-flow table.
 def get_cash_flows(page):
     return get_table_content(page,"cash-flow")
 
+# Wrapper method to fetch the ratios table.
 def get_ratios(page):
     return get_table_content(page,"ratios")
 
+# Wrapper method to fetch the shareholding pattern table.
 def get_shareholding_patterns(page,pattern_type="quarterly-shp"):
     result_dict = {}
     try:
