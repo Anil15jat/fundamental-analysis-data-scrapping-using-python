@@ -5,6 +5,7 @@ The script can be run in a linux machine / windows machine / MAC manually or thr
 Setup:
 
 Steps to run the script -
+
     1. Install python2 or python3 latest version in your system. Prefer python3 to avoid any dependency related issues.
 
     2. Create a venv if you don't want to make any changes in your current env libraries. Use below commands to create your env -
